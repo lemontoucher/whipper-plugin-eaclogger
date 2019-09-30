@@ -1,6 +1,6 @@
 import eaclogger
 import time
-import hashlib
+import pprp.crypto_2
 import whipper
 from whipper.common import common
 from whipper.result import result
@@ -205,13 +205,37 @@ class EacLogger(result.Logger):
         lines.append("End of status report")
         lines.append("")
 
-        # Log checksum (uppercase hex encoded SHA256 hash of all lines)
-        # It isn't compatible with EAC's one: checklog fail
+        text = b''
+        for line in lines:
+            text += line
+        text = text.decode('utf-16-le')
+
+        # Setup Rijndael-256 with a 256-bit blocksize
+        cipher = pprp.crypto_2.rijndael(
+            key = bytes(bytearray.fromhex('9378716cf13e4265ae55338e940b376184da389e50647726b35f6f341ee3efd9')),
+            block_size = 256 // 8
+        )
+
+        # Encode the text as UTF-16-LE
+        plaintext = text.encode('utf-16-le')
+
+        # The IV is all zeroes so we don't have to handle it
+        signature = b'\x00' * 32
+
+        # Process it block-by-block
+        for i in range(0, len(plaintext), 32):
+            # Zero-pad the last block, if necessary
+            plaintext_block = plaintext[i:i + 32].ljust(32, b'\x00')
+
+            # CBC mode (XOR the previous ciphertext block into the plaintext)
+            cbc_plaintext = ''.join(chr(ord(a) ^ ord(b)) for (a, b) in zip(signature, plaintext_block))
+
+            # New signature is the ciphertext.
+            signature = cipher.encrypt(cbc_plaintext)
+
+        # Textual signature is just the hex representation
         lines.append("")
-        hasher = hashlib.sha256()
-        hasher.update("\n".join(lines).encode("utf-8"))
-        lines.append("==== Log checksum %s ====" % hasher.hexdigest().upper())
-        lines.append("")
+        lines.append("==== Log checksum %s ====" % signature.encode('hex').upper())
 
         return lines
 
